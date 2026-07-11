@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 210 20% 98%;
+  --foreground: 224 24% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 224 24% 12%;
+  --muted: 210 16% 93%;
+  --muted-foreground: 221 12% 42%;
+  --border: 214 18% 84%;
+  --primary: 172 66% 30%;
+  --primary-foreground: 0 0% 100%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+@layer components {
+  .menu-item {
+    @apply flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50;
+  }
+
+  .menu-item svg {
+    @apply h-4 w-4;
+  }
+
+  .field-label {
+    @apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-muted-foreground;
+  }
+}

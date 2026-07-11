@@ -1,0 +1,163 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum WorkspaceRole {
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum WorkItemType {
+  EPIC
+  FEATURE
+  TASK
+  BUG
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum WorkItemStatus {
+  BACKLOG
+  TODO
+  IN_PROGRESS
+  DONE
+}
+
+enum SprintStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+}
+
+enum BoardType {
+  SPRINT
+  KANBAN
+}
+
+model User {
+  id          String            @id @default(uuid())
+  name        String
+  email       String            @unique
+  password    String
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  memberships WorkspaceMember[]
+  assigned    WorkItem[]        @relation("AssigneeWorkItems")
+  comments    Comment[]
+}
+
+model Workspace {
+  id        String            @id @default(uuid())
+  name      String
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  members   WorkspaceMember[]
+  workItems WorkItem[]
+  sprints   Sprint[]
+  boards    Board[]
+}
+
+model WorkspaceMember {
+  id          String        @id @default(uuid())
+  role        WorkspaceRole @default(MEMBER)
+  userId      String
+  workspaceId String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+}
+
+model WorkItem {
+  id             String         @id @default(uuid())
+  title          String
+  description    String?
+  type           WorkItemType   @default(TASK)
+  priority       Priority       @default(MEDIUM)
+  status         WorkItemStatus @default(BACKLOG)
+  estimate       Int?
+  position       Int            @default(0)
+  workspaceId    String
+  assigneeId     String?
+  parentEpicId   String?
+  sprintId       String?
+  columnId       String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  workspace      Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assignee       User?          @relation("AssigneeWorkItems", fields: [assigneeId], references: [id], onDelete: SetNull)
+  parentEpic     WorkItem?      @relation("EpicChildren", fields: [parentEpicId], references: [id], onDelete: SetNull)
+  children       WorkItem[]     @relation("EpicChildren")
+  sprint         Sprint?        @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  column         BoardColumn?   @relation(fields: [columnId], references: [id], onDelete: SetNull)
+  comments       Comment[]
+
+  @@index([workspaceId])
+  @@index([workspaceId, sprintId, position])
+  @@index([parentEpicId])
+  @@index([sprintId])
+  @@index([columnId])
+}
+
+model Sprint {
+  id          String       @id @default(uuid())
+  name        String
+  goal        String?
+  startDate   DateTime
+  endDate     DateTime
+  status      SprintStatus @default(PLANNED)
+  workspaceId String
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workItems   WorkItem[]
+  board       Board?
+}
+
+model Board {
+  id          String        @id @default(uuid())
+  name        String
+  type        BoardType
+  workspaceId String
+  sprintId    String?       @unique
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sprint      Sprint?       @relation(fields: [sprintId], references: [id], onDelete: Cascade)
+  columns     BoardColumn[]
+}
+
+model BoardColumn {
+  id        String     @id @default(uuid())
+  name      String
+  position  Int
+  boardId   String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  board     Board      @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  workItems WorkItem[]
+}
+
+model Comment {
+  id         String   @id @default(uuid())
+  message    String
+  workItemId String
+  userId     String
+  createdAt  DateTime @default(now())
+  workItem   WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
