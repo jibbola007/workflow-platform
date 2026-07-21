@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { WorkspacesService } from "../workspaces/workspaces.service";
-import { CreateWorkItemDto, UpdateWorkItemDto } from "./dto";
+import { BacklogQueryDto, CreateWorkItemDto, UpdateWorkItemDto } from "./dto";
 
 @Injectable()
 export class WorkItemsService {
@@ -49,14 +49,37 @@ export class WorkItemsService {
     });
   }
 
-  async backlog(userId: string, workspaceId?: string, assigneeId?: string) {
-    if (!workspaceId) throw new BadRequestException("workspaceId is required");
-    await this.workspaces.assertMember(userId, workspaceId);
+  async backlog(userId: string, query: BacklogQueryDto) {
+    await this.workspaces.assertMember(userId, query.workspaceId);
     return this.prisma.workItem.findMany({
-      where: { workspaceId, sprintId: null, assigneeId: assigneeId || undefined },
+      where: {
+        workspaceId: query.workspaceId,
+        sprintId: null,
+        assigneeId: query.assigneeId,
+        status: query.status,
+        parentEpicId: query.epicId,
+        type: { not: "EPIC" }
+      },
       include: this.include(),
       orderBy: [{ position: "asc" }, { createdAt: "asc" }]
     });
+  }
+
+  async reorderBacklog(userId: string, workItemIds: string[]) {
+    if (new Set(workItemIds).size !== workItemIds.length) {
+      throw new BadRequestException("workItemIds must not contain duplicates");
+    }
+    const items = await this.prisma.workItem.findMany({ where: { id: { in: workItemIds } } });
+    if (items.length !== workItemIds.length) throw new NotFoundException("One or more work items were not found");
+    const workspaceId = items[0].workspaceId;
+    if (items.some((item) => item.workspaceId !== workspaceId || item.sprintId !== null)) {
+      throw new BadRequestException("Only backlog items from one workspace can be reordered");
+    }
+    await this.workspaces.assertRole(userId, workspaceId, ["ADMIN", "MEMBER"]);
+    await this.prisma.$transaction(
+      workItemIds.map((id, position) => this.prisma.workItem.update({ where: { id }, data: { position } }))
+    );
+    return this.prisma.workItem.findMany({ where: { id: { in: workItemIds } }, include: this.include(), orderBy: { position: "asc" } });
   }
 
   async get(userId: string, id: string) {
@@ -69,6 +92,7 @@ export class WorkItemsService {
   async update(userId: string, id: string, dto: UpdateWorkItemDto) {
     const item = await this.get(userId, id);
     await this.workspaces.assertRole(userId, item.workspaceId, ["ADMIN", "MEMBER"]);
+    if (dto.parentEpicId === id) throw new BadRequestException("A work item cannot be its own epic");
     if (dto.parentEpicId) await this.assertEpic(item.workspaceId, dto.parentEpicId);
     if (dto.assigneeId) await this.assertWorkspaceAssignee(item.workspaceId, dto.assigneeId);
 
@@ -119,9 +143,11 @@ export class WorkItemsService {
     const item = await this.getForWrite(userId, id);
     const scope = { workspaceId: item.workspaceId, sprintId: item.sprintId };
     return this.prisma.$transaction(async (tx) => {
-      const edge = await tx.workItem.aggregate({ where: scope, _min: { position: true }, _max: { position: true } });
-      const position = destination === "TOP" ? (edge._min.position ?? 0) - 1 : (edge._max.position ?? -1) + 1;
-      return tx.workItem.update({ where: { id }, data: { position }, include: this.include() });
+      const ordered = await tx.workItem.findMany({ where: scope, orderBy: { position: "asc" } });
+      const ids = ordered.filter((entry) => entry.id !== id).map((entry) => entry.id);
+      if (destination === "TOP") ids.unshift(id); else ids.push(id);
+      await Promise.all(ids.map((entryId, position) => tx.workItem.update({ where: { id: entryId }, data: { position } })));
+      return tx.workItem.findUniqueOrThrow({ where: { id }, include: this.include() });
     });
   }
 

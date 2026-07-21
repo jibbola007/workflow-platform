@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { CreateWorkItemDto, MoveWorkItemPositionDto, MoveWorkItemToSprintDto, UpdateAssigneeDto, UpdateDescriptionDto, UpdateEstimateDto, UpdateStatusDto, UpdateWorkItemDto } from "./dto";
+import { BacklogQueryDto, CreateWorkItemDto, MoveWorkItemPositionDto, MoveWorkItemToSprintDto, ReorderBacklogDto, UpdateAssigneeDto, UpdateDescriptionDto, UpdateEstimateDto, UpdateStatusDto, UpdateWorkItemDto } from "./dto";
 import { WorkItemsService } from "./work-items.service";
 
 @UseGuards(JwtAuthGuard)
@@ -20,8 +20,13 @@ export class WorkItemsController {
   }
 
   @Get("backlog")
-  backlog(@CurrentUser() user: CurrentUser, @Query("workspaceId") workspaceId?: string, @Query("assigneeId") assigneeId?: string) {
-    return this.workItems.backlog(user.id, workspaceId, assigneeId);
+  backlog(@CurrentUser() user: CurrentUser, @Query() query: BacklogQueryDto) {
+    return this.workItems.backlog(user.id, query);
+  }
+
+  @Patch("backlog/order")
+  reorderBacklog(@CurrentUser() user: CurrentUser, @Body() dto: ReorderBacklogDto) {
+    return this.workItems.reorderBacklog(user.id, dto.workItemIds);
   }
 
   @Get(":id")
@@ -31,6 +36,7 @@ export class WorkItemsController {
 
   @Patch(":id")
   update(@CurrentUser() user: CurrentUser, @Param("id") id: string, @Body() dto: UpdateWorkItemDto) {
+    console.log("PATCH /work-items/:id DTO RECEIVED:", dto);
     return this.workItems.update(user.id, id, dto);
   }
 

@@ -1,5 +1,5 @@
 import { Priority, WorkItemStatus, WorkItemType } from "@prisma/client";
-import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Min } from "class-validator";
+import { ArrayNotEmpty, IsArray, IsEnum, IsInt, IsOptional, IsString, IsUUID, Min, ValidateIf } from "class-validator";
 
 export class CreateWorkItemDto {
   @IsString()
@@ -45,6 +45,7 @@ export class UpdateWorkItemDto {
   @IsOptional()
   title?: string;
 
+  @ValidateIf((_, v) => v !== null)
   @IsString()
   @IsOptional()
   description?: string;
@@ -65,26 +66,54 @@ export class UpdateWorkItemDto {
   @IsOptional()
   estimate?: number;
 
+  @ValidateIf((_, v) => v !== null)
   @IsUUID()
   @IsOptional()
-  assigneeId?: string | null;
+  assigneeId?: string;
 
+  @ValidateIf((_, v) => v !== null)
   @IsUUID()
   @IsOptional()
-  parentEpicId?: string | null;
+  parentEpicId?: string;
 
+  @ValidateIf((_, v) => v !== null)
   @IsUUID()
   @IsOptional()
-  sprintId?: string | null;
+  sprintId?: string;
 
+  @ValidateIf((_, v) => v !== null)
   @IsUUID()
   @IsOptional()
-  columnId?: string | null;
+  columnId?: string;
 }
 
-export class UpdateAssigneeDto { @IsUUID() @IsOptional() assigneeId?: string | null; }
-export class UpdateEstimateDto { @IsInt() @Min(0) @IsOptional() estimate?: number | null; }
+export class UpdateAssigneeDto { @ValidateIf((_, v) => v !== null) @IsUUID() @IsOptional() assigneeId?: string; }
+export class UpdateEstimateDto { @ValidateIf((_, v) => v !== null) @IsInt() @Min(0) @IsOptional() estimate?: number; }
 export class UpdateStatusDto { @IsEnum(WorkItemStatus) status!: WorkItemStatus; }
-export class UpdateDescriptionDto { @IsString() @IsOptional() description?: string | null; }
-export class MoveWorkItemToSprintDto { @IsUUID() @IsOptional() sprintId?: string | null; }
+export class UpdateDescriptionDto { @ValidateIf((_, v) => v !== null) @IsString() @IsOptional() description?: string; }
+export class MoveWorkItemToSprintDto { @ValidateIf((_, v) => v !== null) @IsUUID() @IsOptional() sprintId?: string; }
 export class MoveWorkItemPositionDto { @IsEnum(["TOP", "BOTTOM"]) position!: "TOP" | "BOTTOM"; }
+
+export class BacklogQueryDto {
+  @IsUUID()
+  workspaceId!: string;
+
+  @IsUUID()
+  @IsOptional()
+  assigneeId?: string;
+
+  @IsEnum(WorkItemStatus)
+  @IsOptional()
+  status?: WorkItemStatus;
+
+  @IsUUID()
+  @IsOptional()
+  epicId?: string;
+}
+
+export class ReorderBacklogDto {
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsUUID("4", { each: true })
+  workItemIds!: string[];
+}

@@ -6,7 +6,7 @@ export type WorkItem = {
   id: string;
   title: string;
   description?: string;
-  type: "EPIC" | "FEATURE" | "TASK" | "BUG";
+  type: "TASK" | "FEATURE" | "BUG" | "EPIC" | "STORY";
   priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
   status: "BACKLOG" | "TODO" | "IN_PROGRESS" | "DONE";
   estimate?: number;
@@ -14,6 +14,8 @@ export type WorkItem = {
   workspaceId: string;
   sprintId?: string;
   columnId?: string;
+  createdAt?: string;
+  updatedAt?: string;
   assignee?: User;
   parentEpic?: { id: string; title: string };
   comments?: Array<{ id: string; message: string; createdAt: string; user: Pick<User, "id" | "name"> }>;

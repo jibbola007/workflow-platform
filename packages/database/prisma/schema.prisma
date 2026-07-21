@@ -17,6 +17,7 @@ enum WorkspaceRole {
 enum WorkItemType {
   EPIC
   FEATURE
+  STORY
   TASK
   BUG
 }
