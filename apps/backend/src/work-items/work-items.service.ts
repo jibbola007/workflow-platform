@@ -1,24 +1,110 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { WorkspacesService } from "../workspaces/workspaces.service";
 import { BacklogQueryDto, CreateWorkItemDto, UpdateWorkItemDto } from "./dto";
 
+export function generateWorkspacePrefix(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length >= 2) {
+    const p = words.map((w) => w.replace(/[^a-zA-Z0-9]/g, "")[0] || "").join("").toUpperCase().slice(0, 5);
+    if (p) return p;
+  }
+  const clean = name.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+  return clean.slice(0, 2) || "WORK";
+}
+
 @Injectable()
-export class WorkItemsService {
+export class WorkItemsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly workspaces: WorkspacesService
   ) {}
 
+  async onModuleInit() {
+    await this.backfillWorkItemKeys();
+  }
+
+  async backfillWorkItemKeys() {
+    try {
+      const workspaces = await this.prisma.workspace.findMany({
+        include: {
+          workItems: {
+            orderBy: { createdAt: "asc" }
+          }
+        }
+      });
+
+      for (const workspace of workspaces) {
+        const prefix = workspace.prefix || generateWorkspacePrefix(workspace.name);
+        let counter = workspace.keyCounter || 0;
+        let updatedCounter = counter;
+
+        for (const item of workspace.workItems) {
+          if (!item.key) {
+            counter += 1;
+            const key = `${prefix}-${counter}`;
+            await this.prisma.workItem.update({
+              where: { id: item.id },
+              data: { key }
+            });
+            updatedCounter = counter;
+          }
+        }
+
+        await this.prisma.workspace.update({
+          where: { id: workspace.id },
+          data: {
+            prefix,
+            keyCounter: Math.max(updatedCounter, workspace.keyCounter)
+          }
+        });
+      }
+    } catch (err) {
+      console.error("Backfill work item keys failed:", err);
+    }
+  }
+
   async create(userId: string, dto: CreateWorkItemDto) {
     await this.workspaces.assertRole(userId, dto.workspaceId, ["ADMIN", "MEMBER"]);
     if (dto.parentEpicId) await this.assertEpic(dto.workspaceId, dto.parentEpicId);
 
-    const last = await this.prisma.workItem.aggregate({ where: { workspaceId: dto.workspaceId, sprintId: dto.sprintId ?? null }, _max: { position: true } });
-    return this.prisma.workItem.create({
-      data: { ...dto, position: (last._max.position ?? -1) + 1 },
-      include: this.include()
+    return this.prisma.$transaction(async (tx) => {
+      const workspace = await tx.workspace.update({
+        where: { id: dto.workspaceId },
+        data: { keyCounter: { increment: 1 } }
+      });
+
+      const prefix = workspace.prefix || generateWorkspacePrefix(workspace.name);
+      if (!workspace.prefix) {
+        await tx.workspace.update({
+          where: { id: dto.workspaceId },
+          data: { prefix }
+        });
+      }
+
+      const key = `${prefix}-${workspace.keyCounter}`;
+      const last = await tx.workItem.aggregate({
+        where: { workspaceId: dto.workspaceId, sprintId: dto.sprintId ?? null },
+        _max: { position: true }
+      });
+
+      let color: string | undefined = undefined;
+      if (dto.type === "EPIC") {
+        const epicCount = await tx.workItem.count({ where: { workspaceId: dto.workspaceId, type: "EPIC" } });
+        const EPIC_COLORS = ["purple", "blue", "emerald", "amber", "rose", "teal", "pink", "indigo", "cyan", "orange"];
+        color = EPIC_COLORS[epicCount % EPIC_COLORS.length];
+      }
+
+      return tx.workItem.create({
+        data: {
+          ...dto,
+          key,
+          color,
+          position: (last._max.position ?? -1) + 1
+        },
+        include: this.include()
+      });
     });
   }
 
@@ -37,7 +123,8 @@ export class WorkItemsService {
       OR: query.search
         ? [
             { title: { contains: query.search, mode: "insensitive" } },
-            { description: { contains: query.search, mode: "insensitive" } }
+            { description: { contains: query.search, mode: "insensitive" } },
+            { key: { contains: query.search, mode: "insensitive" } }
           ]
         : undefined
     };
@@ -106,8 +193,16 @@ export class WorkItemsService {
   async delete(userId: string, id: string) {
     const item = await this.get(userId, id);
     await this.workspaces.assertRole(userId, item.workspaceId, ["ADMIN", "MEMBER"]);
+    let unlinkedChildrenCount = 0;
+    if (item.type === "EPIC") {
+      const res = await this.prisma.workItem.updateMany({
+        where: { parentEpicId: id },
+        data: { parentEpicId: null }
+      });
+      unlinkedChildrenCount = res.count;
+    }
     await this.prisma.workItem.delete({ where: { id } });
-    return { deleted: true };
+    return { deleted: true, id, unlinkedChildrenCount };
   }
 
   async updateAssignee(userId: string, id: string, assigneeId: string | null) {
@@ -172,7 +267,8 @@ export class WorkItemsService {
   private include() {
     return {
       assignee: { select: { id: true, name: true, email: true } },
-      parentEpic: { select: { id: true, title: true } },
+      parentEpic: { select: { id: true, title: true, color: true } },
+      _count: { select: { children: true } },
       comments: { include: { user: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" as const } }
     };
   }

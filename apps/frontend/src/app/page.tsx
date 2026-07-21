@@ -274,10 +274,10 @@ function WorkItemForm({ api, workspaceId, items, reload }: { api: ApiClient; wor
       <form className="grid gap-2 md:grid-cols-[1fr_140px_140px_180px_auto]" onSubmit={submit}>
         <Input name="title" placeholder="Create Work Item" required />
         <Select name="type" defaultValue="TASK">
-          {["EPIC", "FEATURE", "TASK", "BUG"].map((type) => <option key={type}>{type}</option>)}
+          {["EPIC", "FEATURE", "TASK", "BUG", "STORY"].map((type) => <option key={type} value={type}>{type}</option>)}
         </Select>
         <Select name="priority" defaultValue="MEDIUM">
-          {["LOW", "MEDIUM", "HIGH", "URGENT"].map((priority) => <option key={priority}>{priority}</option>)}
+          {["LOW", "MEDIUM", "HIGH", "URGENT"].map((priority) => <option key={priority} value={priority}>{priority}</option>)}
         </Select>
         <Select name="parentEpicId" defaultValue="">
           <option value="">No epic</option>
