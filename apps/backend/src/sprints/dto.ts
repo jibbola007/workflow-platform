@@ -44,6 +44,10 @@ export class UpdateSprintDto {
   @IsEnum(SprintStatus)
   @IsOptional()
   status?: SprintStatus;
+
+  @IsUUID()
+  @IsOptional()
+  workspaceId?: string;
 }
 
 export class SprintWorkItemDto {

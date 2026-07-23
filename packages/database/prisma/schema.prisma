@@ -29,13 +29,6 @@ enum Priority {
   URGENT
 }
 
-enum WorkItemStatus {
-  BACKLOG
-  TODO
-  IN_PROGRESS
-  DONE
-}
-
 enum SprintStatus {
   PLANNED
   ACTIVE
@@ -93,7 +86,7 @@ model WorkItem {
   color          String?
   type           WorkItemType   @default(TASK)
   priority       Priority       @default(MEDIUM)
-  status         WorkItemStatus @default(BACKLOG)
+  status         String         @default("To Do")
   estimate       Int?
   position       Int            @default(0)
   workspaceId    String
@@ -126,6 +119,7 @@ model Sprint {
   goal        String?
   startDate   DateTime
   endDate     DateTime
+  completedAt DateTime?
   status      SprintStatus @default(PLANNED)
   workspaceId String
   createdAt   DateTime     @default(now())

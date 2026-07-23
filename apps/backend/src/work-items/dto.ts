@@ -1,4 +1,4 @@
-import { Priority, WorkItemStatus, WorkItemType } from "@prisma/client";
+import { Priority, WorkItemType } from "@prisma/client";
 import { ArrayNotEmpty, IsArray, IsEnum, IsInt, IsOptional, IsString, IsUUID, Min, ValidateIf } from "class-validator";
 
 export class CreateWorkItemDto {
@@ -15,6 +15,10 @@ export class CreateWorkItemDto {
   @IsEnum(Priority)
   @IsOptional()
   priority?: Priority;
+
+  @IsString()
+  @IsOptional()
+  status?: string;
 
   @IsInt()
   @IsOptional()
@@ -58,9 +62,9 @@ export class UpdateWorkItemDto {
   @IsOptional()
   priority?: Priority;
 
-  @IsEnum(WorkItemStatus)
+  @IsString()
   @IsOptional()
-  status?: WorkItemStatus;
+  status?: string;
 
   @IsInt()
   @IsOptional()
@@ -89,7 +93,7 @@ export class UpdateWorkItemDto {
 
 export class UpdateAssigneeDto { @ValidateIf((_, v) => v !== null) @IsUUID() @IsOptional() assigneeId?: string; }
 export class UpdateEstimateDto { @ValidateIf((_, v) => v !== null) @IsInt() @Min(0) @IsOptional() estimate?: number; }
-export class UpdateStatusDto { @IsEnum(WorkItemStatus) status!: WorkItemStatus; }
+export class UpdateStatusDto { @IsString() status!: string; }
 export class UpdateDescriptionDto { @ValidateIf((_, v) => v !== null) @IsString() @IsOptional() description?: string; }
 export class MoveWorkItemToSprintDto { @ValidateIf((_, v) => v !== null) @IsUUID() @IsOptional() sprintId?: string; }
 export class MoveWorkItemPositionDto { @IsEnum(["TOP", "BOTTOM"]) position!: "TOP" | "BOTTOM"; }
@@ -102,9 +106,9 @@ export class BacklogQueryDto {
   @IsOptional()
   assigneeId?: string;
 
-  @IsEnum(WorkItemStatus)
+  @IsString()
   @IsOptional()
-  status?: WorkItemStatus;
+  status?: string;
 
   @IsUUID()
   @IsOptional()

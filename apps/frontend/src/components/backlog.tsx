@@ -2,7 +2,7 @@
 
 import { Check, ChevronDown, CircleDot, Ellipsis, GripVertical, Pencil, Plus, Search, Trash2, X, CheckCircle2, Zap, Bug, BookOpen, Mountain } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiClient, Sprint, User, WorkItem } from "@/lib/api";
+import { ApiClient, Board, Sprint, User, WorkItem } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,6 @@ import { Select } from "@/components/ui/select";
 
 type Member = { id: string; role: string; user: User };
 type Filters = { assigneeId: string; status: string; epicId: string };
-const statuses = ["BACKLOG", "TODO", "IN_PROGRESS", "DONE"] as const;
 const priorities = ["LOW", "MEDIUM", "HIGH", "URGENT"] as const;
 const points = [1, 2, 3, 5, 8, 13];
 
@@ -54,6 +53,7 @@ export function Backlog({ api, workspaceId, members }: { api: ApiClient; workspa
   const [items, setItems] = useState<WorkItem[]>([]);
   const [epics, setEpics] = useState<WorkItem[]>([]);
   const [sprints, setSprints] = useState<Sprint[]>([]);
+  const [boards, setBoards] = useState<Board[]>([]);
   const [filters, setFilters] = useState<Filters>({ assigneeId: "", status: "", epicId: "" });
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<WorkItem>();
@@ -71,15 +71,24 @@ export function Backlog({ api, workspaceId, members }: { api: ApiClient; workspa
     try {
       const query = new URLSearchParams({ workspaceId });
       Object.entries(filters).forEach(([key, value]) => { if (value) query.set(key, value); });
-      const [backlog, nextSprints, nextEpics] = await Promise.all([
+      const [backlog, nextSprints, nextEpics, nextBoards] = await Promise.all([
         api.request<WorkItem[]>(`/work-items/backlog?${query}`),
         api.request<Sprint[]>(`/sprints?workspaceId=${workspaceId}`),
-        api.request<WorkItem[]>(`/work-items?workspaceId=${workspaceId}&type=EPIC`)
+        api.request<WorkItem[]>(`/work-items?workspaceId=${workspaceId}&type=EPIC`),
+        api.request<Board[]>(`/boards?workspaceId=${workspaceId}`)
       ]);
-      setItems(backlog); setSprints(nextSprints); setEpics(nextEpics);
+      setItems(backlog); setSprints(nextSprints); setEpics(nextEpics); setBoards(nextBoards);
     } catch (err) { setError(message(err, "Could not load backlog")); }
     finally { setLoading(false); }
   }, [api, filters, workspaceId]);
+
+  const availableStatuses = useMemo(() => {
+    const set = new Set<string>();
+    boards.forEach((b) => b.columns?.forEach((c) => { if (c.name) set.add(c.name); }));
+    items.forEach((item) => { if (item.status) set.add(item.status); });
+    if (set.size === 0) return ["To Do", "In Progress", "Done"];
+    return Array.from(set);
+  }, [boards, items]);
 
   useEffect(() => { void load(); }, [load]);
   const visibleItems = useMemo(() => items.filter((item) => item.type !== "EPIC" && (item.title.toLowerCase().includes(search.toLowerCase()) || (item.key && item.key.toLowerCase().includes(search.toLowerCase())))), [items, search]);
@@ -194,7 +203,7 @@ export function Backlog({ api, workspaceId, members }: { api: ApiClient; workspa
     <Card className="p-2"><div className="flex flex-wrap gap-2">
       <div className="relative min-w-52 flex-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><Input className="pl-9" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search backlog" /></div>
       <Filter value={filters.assigneeId} label="All assignees" onChange={(assigneeId) => setFilters((current) => ({ ...current, assigneeId }))}>{members.map(({ user }) => <option key={user.id} value={user.id}>{user.name}</option>)}</Filter>
-      <Filter value={filters.status} label="All statuses" onChange={(status) => setFilters((current) => ({ ...current, status }))}>{statuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</Filter>
+      <Filter value={filters.status} label="All statuses" onChange={(status) => setFilters((current) => ({ ...current, status }))}>{availableStatuses.map((status) => <option key={status} value={status}>{label(status)}</option>)}</Filter>
       <Filter value={filters.epicId} label="All epics" onChange={(epicId) => setFilters((current) => ({ ...current, epicId }))}>{epics.map((epic) => <option key={epic.id} value={epic.id}>{epic.title}</option>)}</Filter>
     </div></Card>
     {error && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -202,7 +211,7 @@ export function Backlog({ api, workspaceId, members }: { api: ApiClient; workspa
     <div className="rounded-lg border bg-white overflow-visible"><div className="hidden grid-cols-[minmax(260px,1fr)_130px_108px_70px_120px_32px] items-center gap-3 border-b bg-slate-50 px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground md:grid rounded-t-lg"><span>Work item</span><span>Epic</span><span>Status</span><span>Points</span><span>Assignee</span><span /></div>
       {loading ? <LoadingRows /> : visibleItems.length === 0 ? <div className="p-10 text-center text-sm text-muted-foreground">{items.filter((item) => item.type !== "EPIC").length ? "No work items match your search." : "Your backlog is clear. Add the next piece of work when you’re ready."}</div> : visibleItems.map((item) => <BacklogRow key={item.id} item={item} sprints={sprints} activeMenuId={activeMenuId} setActiveMenuId={setActiveMenuId} onOpen={() => setSelected(item)} onUpdate={mutate} onDelete={remove} onRefresh={load} draggable={canReorder} onDragStart={() => setDraggedId(item.id)} onDrop={() => void reorder(item.id)} />)}</div>
     {!canReorder && <p className="text-xs text-muted-foreground">Clear search and filters to reorder the complete backlog.</p>}
-    {selected && <WorkItemDrawer item={selected} members={members} epics={epics} api={api} onClose={() => setSelected(undefined)} onDelete={remove} onSaved={(result) => { updateLocal(result); setToast("Changes saved successfully"); void load(); }} />}
+    {selected && <WorkItemDrawer item={selected} members={members} epics={epics} api={api} statuses={availableStatuses} onClose={() => setSelected(undefined)} onDelete={remove} onSaved={(result) => { updateLocal(result); setToast("Changes saved successfully"); void load(); }} />}
     {deletingEpic && (
       <EpicDeleteModal
         epic={deletingEpic}
@@ -365,27 +374,48 @@ function BacklogRow({ item, sprints, activeMenuId, setActiveMenuId, onOpen, onUp
   </article>;
 }
 
-function WorkItemDrawer({ item, members, epics, api, onClose, onDelete, onSaved }: { item: WorkItem; members: Member[]; epics: WorkItem[]; api: ApiClient; onClose: () => void; onDelete: (item: WorkItem) => void; onSaved: (item: WorkItem) => void }) {
+export function WorkItemDrawer({ item, members, epics, api, statuses, onClose, onDelete, onSaved }: { item: WorkItem; members: Member[]; epics: WorkItem[]; api: ApiClient; statuses?: string[]; onClose: () => void; onDelete: (item: WorkItem) => void; onSaved: (item: WorkItem) => void }) {
   const [draft, setDraft] = useState(draftFor(item)); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
   useEffect(() => setDraft(draftFor(item)), [item]);
+  const statusOptions = useMemo(() => {
+    const opts = new Set(statuses && statuses.length > 0 ? statuses : ["To Do", "In Progress", "Done"]);
+    if (draft.status) opts.add(draft.status);
+    return Array.from(opts);
+  }, [statuses, draft.status]);
   const save = async () => { setSaving(true); setError(""); try { const result = await api.request<WorkItem>(`/work-items/${item.id}`, { method: "PATCH", body: JSON.stringify({ ...draft, estimate: draft.estimate ? Number(draft.estimate) : null, assigneeId: draft.assigneeId || null, parentEpicId: draft.parentEpicId || null, description: draft.description || null }) }); onSaved(result); onClose(); } catch (err) { setError(message(err, "Could not save work item")); } finally { setSaving(false); } };
-  return <div className="fixed inset-0 z-40 bg-slate-900/20" onMouseDown={onClose}><aside className="absolute right-0 top-0 h-full w-full max-w-xl overflow-y-auto bg-white p-5 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}><div className="mb-5 flex items-start justify-between gap-3"><div><div className="flex items-center gap-2">{item.key && <span className="font-mono text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{item.key}</span>}<span className="text-sm font-semibold text-muted-foreground">{label(item.type)}</span></div><p className="mt-1 text-xs text-muted-foreground">Created {date(item.createdAt)} · Updated {date(item.updatedAt)}</p></div><button onClick={onClose} className="rounded p-1 hover:bg-muted" aria-label="Close"><X className="h-5 w-5" /></button></div><Input className={`mb-5 h-auto border-0 px-0 text-xl font-semibold shadow-none focus-visible:ring-0 ${draft.status === "DONE" ? "line-through text-slate-400" : ""}`} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /><Field label="Description"><textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Add context, decisions, or acceptance criteria…" className="min-h-36 w-full rounded-md border p-3 text-sm outline-none focus:ring-2 focus:ring-teal-600" /></Field><div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Status"><Select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as WorkItem["status"] })}>{statuses.map((value) => <option key={value} value={value}>{label(value)}</option>)}</Select></Field><Field label="Priority"><Select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value as WorkItem["priority"] })}>{priorities.map((value) => <option key={value} value={value}>{label(value)}</option>)}</Select></Field><Field label="Story points"><Select value={draft.estimate} onChange={(event) => setDraft({ ...draft, estimate: event.target.value })}><option value="">None</option>{points.map((value) => <option key={value} value={value}>{value}</option>)}</Select></Field><Field label="Assignee"><Select value={draft.assigneeId} onChange={(event) => setDraft({ ...draft, assigneeId: event.target.value })}><option value="">Unassigned</option>{members.map(({ user }) => <option key={user.id} value={user.id}>{user.name}</option>)}</Select></Field><Field label="Epic"><Select value={draft.parentEpicId} onChange={(event) => setDraft({ ...draft, parentEpicId: event.target.value })}><option value="">No epic</option>{epics.filter((epic) => epic.id !== item.id).map((epic) => <option key={epic.id} value={epic.id}>{epic.title}</option>)}</Select>{draft.parentEpicId && (() => { const selectedEpic = epics.find((e) => e.id === draft.parentEpicId); if (!selectedEpic) return null; const theme = getEpicColor(selectedEpic); return <div className="mt-1.5 flex items-center gap-1.5"><span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs font-semibold ${theme.bg} ${theme.text} ${theme.border}`}><span className={`h-1.5 w-1.5 rounded-full ${theme.dot}`} />{selectedEpic.title}</span></div>; })()}</Field></div>{error && <p className="mt-3 text-sm text-red-600">{error}</p>}<div className="sticky bottom-0 mt-6 flex items-center justify-between border-t bg-white pt-3"><Button className="border border-red-200 bg-red-50 text-red-600 hover:bg-red-100" onClick={() => onDelete(item)}><Trash2 className="h-4 w-4" />Delete</Button><div className="flex gap-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button disabled={saving || !draft.title.trim()} onClick={() => void save()}>{saving ? "Saving…" : "Save changes"}</Button></div></div></aside></div>;
+  return <div className="fixed inset-0 z-40 bg-slate-900/20" onMouseDown={onClose}><aside className="absolute right-0 top-0 h-full w-full max-w-xl overflow-y-auto bg-white p-5 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}><div className="mb-5 flex items-start justify-between gap-3"><div><div className="flex items-center gap-2">{item.key && <span className="font-mono text-xs font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{item.key}</span>}<span className="text-sm font-semibold text-muted-foreground">{label(item.type)}</span></div><p className="mt-1 text-xs text-muted-foreground">Created {date(item.createdAt)} · Updated {date(item.updatedAt)}</p></div><button onClick={onClose} className="rounded p-1 hover:bg-muted" aria-label="Close"><X className="h-5 w-5" /></button></div><Input className={`mb-5 h-auto border-0 px-0 text-xl font-semibold shadow-none focus-visible:ring-0 ${draft.status?.toLowerCase().includes("done") ? "line-through text-slate-400" : ""}`} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /><Field label="Description"><textarea value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="Add context, decisions, or acceptance criteria…" className="min-h-36 w-full rounded-md border p-3 text-sm outline-none focus:ring-2 focus:ring-teal-600" /></Field><div className="mt-5 grid gap-4 sm:grid-cols-2"><Field label="Status"><Select value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value })}>{statusOptions.map((value) => <option key={value} value={value}>{label(value)}</option>)}</Select></Field><Field label="Priority"><Select value={draft.priority} onChange={(event) => setDraft({ ...draft, priority: event.target.value as WorkItem["priority"] })}>{priorities.map((value) => <option key={value} value={value}>{label(value)}</option>)}</Select></Field><Field label="Story points"><Select value={draft.estimate} onChange={(event) => setDraft({ ...draft, estimate: event.target.value })}><option value="">None</option>{points.map((value) => <option key={value} value={value}>{value}</option>)}</Select></Field><Field label="Assignee"><Select value={draft.assigneeId} onChange={(event) => setDraft({ ...draft, assigneeId: event.target.value })}><option value="">Unassigned</option>{members.map(({ user }) => <option key={user.id} value={user.id}>{user.name}</option>)}</Select></Field><Field label="Epic"><Select value={draft.parentEpicId} onChange={(event) => setDraft({ ...draft, parentEpicId: event.target.value })}><option value="">No epic</option>{epics.filter((epic) => epic.id !== item.id).map((epic) => <option key={epic.id} value={epic.id}>{epic.title}</option>)}</Select>{draft.parentEpicId && (() => { const selectedEpic = epics.find((e) => e.id === draft.parentEpicId); if (!selectedEpic) return null; const theme = getEpicColor(selectedEpic); return <div className="mt-1.5 flex items-center gap-1.5"><span className={`inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs font-semibold ${theme.bg} ${theme.text} ${theme.border}`}><span className={`h-1.5 w-1.5 rounded-full ${theme.dot}`} />{selectedEpic.title}</span></div>; })()}</Field></div>{error && <p className="mt-3 text-sm text-red-600">{error}</p>}<div className="sticky bottom-0 mt-6 flex items-center justify-between border-t bg-white pt-3"><Button className="border border-red-200 bg-red-50 text-red-600 hover:bg-red-100" onClick={() => onDelete(item)}><Trash2 className="h-4 w-4" />Delete</Button><div className="flex gap-2"><Button variant="outline" onClick={onClose}>Cancel</Button><Button disabled={saving || !draft.title.trim()} onClick={() => void save()}>{saving ? "Saving…" : "Save changes"}</Button></div></div></aside></div>;
 }
 
 function QuickCreate({ api, workspaceId, onCreated }: { api: ApiClient; workspaceId: string; onCreated: () => Promise<void> }) { const [title, setTitle] = useState(""); const [type, setType] = useState<WorkItem["type"]>("TASK"); const [open, setOpen] = useState(false); const submit = async (event: FormEvent) => { event.preventDefault(); if (!title.trim()) return; await api.request("/work-items", { method: "POST", body: JSON.stringify({ title: title.trim(), workspaceId, type }) }); setTitle(""); setType("TASK"); setOpen(false); await onCreated(); }; return <form className="flex gap-2" onSubmit={(event) => void submit(event)}>{open && <><Select aria-label="Type" value={type} onChange={(event) => setType(event.target.value as WorkItem["type"])} className="w-32">{["TASK", "FEATURE", "BUG", "STORY", "EPIC"].map(t => <option key={t} value={t}>{label(t)}</option>)}</Select><Input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="What needs doing?" /></>}{open ? <><Button type="submit"><Check className="h-4 w-4" />Add</Button><Button type="button" variant="ghost" onClick={() => setOpen(false)}><X className="h-4 w-4" /></Button></> : <Button type="button" onClick={() => setOpen(true)}><Plus className="h-4 w-4" />Add work item</Button>}</form>; }
 function Filter({ value, label: placeholder, onChange, children }: { value: string; label: string; onChange: (value: string) => void; children: React.ReactNode }) { return <Select aria-label={placeholder} value={value} onChange={(event) => onChange(event.target.value)} className="w-44"><option value="">{placeholder}</option>{children}</Select>; }
-function StatusChip({ status }: { status: WorkItem["status"] }) {
-  const config = {
-    BACKLOG: { bg: "bg-slate-100 text-slate-700 border-slate-200", dot: "bg-slate-400" },
-    TODO: { bg: "bg-blue-50 text-blue-700 border-blue-200", dot: "bg-blue-500" },
-    IN_PROGRESS: { bg: "bg-amber-50 text-amber-700 border-amber-200", dot: "bg-amber-500" },
-    DONE: { bg: "bg-green-50 text-green-700 border-green-200", dot: "bg-green-600" }
-  };
-  const { bg, dot } = config[status] || config.BACKLOG;
+function StatusChip({ status }: { status: string }) {
+  const cleanStatus = status || "Backlog";
+  const lower = cleanStatus.toLowerCase();
+
+  let bg = "bg-slate-100 text-slate-700 border-slate-200";
+  let dot = "bg-slate-400";
+
+  if (lower.includes("done") || lower.includes("completed")) {
+    bg = "bg-green-50 text-green-700 border-green-200";
+    dot = "bg-green-600";
+  } else if (lower.includes("progress")) {
+    bg = "bg-amber-50 text-amber-700 border-amber-200";
+    dot = "bg-amber-500";
+  } else if (lower.includes("test")) {
+    bg = "bg-purple-50 text-purple-700 border-purple-200";
+    dot = "bg-purple-500";
+  } else if (lower.includes("review")) {
+    bg = "bg-indigo-50 text-indigo-700 border-indigo-200";
+    dot = "bg-indigo-500";
+  } else if (lower.includes("todo") || lower.includes("to do")) {
+    bg = "bg-blue-50 text-blue-700 border-blue-200";
+    dot = "bg-blue-500";
+  }
+
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-semibold ${bg}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
-      {label(status)}
+      {label(cleanStatus)}
     </span>
   );
 }

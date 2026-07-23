@@ -1,5 +1,5 @@
 import { BoardType } from "@prisma/client";
-import { IsEnum, IsInt, IsOptional, IsString, IsUUID } from "class-validator";
+import { IsArray, IsEnum, IsInt, IsOptional, IsString, IsUUID } from "class-validator";
 
 export class CreateBoardDto {
   @IsString()
@@ -43,4 +43,10 @@ export class BoardWorkItemDto {
 
   @IsUUID()
   columnId!: string;
+}
+
+export class ReorderColumnsDto {
+  @IsArray()
+  @IsString({ each: true })
+  columnIds!: string[];
 }

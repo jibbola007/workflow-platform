@@ -17,6 +17,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Backlog } from "@/components/backlog";
+import { Sprints } from "@/components/sprints";
 import { ApiClient, Board, Sprint, WorkItem, Workspace } from "@/lib/api";
 
 const nav = [
@@ -81,8 +82,8 @@ export default function App() {
   const activeWorkspace = workspaces.find((workspace) => workspace.id === workspaceId);
 
   return (
-    <main className="flex min-h-screen">
-      <aside className="flex w-64 flex-col border-r bg-white px-4 py-5">
+    <main className="flex h-screen w-screen overflow-hidden bg-slate-50">
+      <aside className="flex w-64 shrink-0 flex-col border-r bg-white px-4 py-5 h-full">
         <div className="mb-6">
           <p className="text-lg font-semibold">Simply Workflow</p>
           <p className="text-sm text-muted-foreground">{activeWorkspace?.name ?? "Create a workspace"}</p>
@@ -120,17 +121,19 @@ export default function App() {
           </Button>
         </div>
       </aside>
-      <section className="flex-1 p-6">
-        <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold">{view}</h1>
-            <p className="text-sm text-muted-foreground">{user?.email ?? "Workspace planning without the clutter"}</p>
-          </div>
-          <WorkspaceForm api={api} onCreated={load} />
-        </header>
+      <section className={`flex flex-1 flex-col h-full min-w-0 ${view === "Sprints" ? "p-4" : "p-6"} ${view === "Sprints" || view === "Backlog" ? "overflow-hidden" : "overflow-y-auto"}`}>
+        {view !== "Sprints" && (
+          <header className="mb-4 shrink-0 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold">{view}</h1>
+              <p className="text-sm text-muted-foreground">{user?.email ?? "Workspace planning without the clutter"}</p>
+            </div>
+            <WorkspaceForm api={api} onCreated={load} />
+          </header>
+        )}
         {view === "Dashboard" && <Dashboard items={items} sprints={sprints} boards={boards} />}
         {view === "Backlog" && <Backlog api={api} workspaceId={workspaceId} members={activeWorkspace?.members ?? []} />}
-        {view === "Sprints" && <Sprints api={api} workspaceId={workspaceId} sprints={sprints} items={items} reload={load} />}
+        {view === "Sprints" && <Sprints api={api} workspaceId={workspaceId} members={activeWorkspace?.members ?? []} />}
         {view === "Boards" && <Boards api={api} workspaceId={workspaceId} boards={boards} reload={load} />}
         {view === "Team" && <Team workspace={activeWorkspace} />}
         {view === "Settings" && <SettingsView workspace={activeWorkspace} />}
@@ -289,41 +292,7 @@ function WorkItemForm({ api, workspaceId, items, reload }: { api: ApiClient; wor
   );
 }
 
-function Sprints({ api, workspaceId, sprints, items, reload }: { api: ApiClient; workspaceId: string; sprints: Sprint[]; items: WorkItem[]; reload: () => Promise<void> }) {
-  async function createSprint() {
-    const today = new Date();
-    const end = new Date(today);
-    end.setDate(today.getDate() + 14);
-    await api.request("/sprints", {
-      method: "POST",
-      body: JSON.stringify({ workspaceId, name: `Sprint ${sprints.length + 1}`, goal: "", startDate: today, endDate: end })
-    });
-    await reload();
-  }
-  return (
-    <div className="space-y-3">
-      <Button onClick={createSprint}><Plus className="h-4 w-4" />Sprint</Button>
-      {sprints.map((sprint) => (
-        <Card key={sprint.id} className="p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="font-medium">{sprint.name}</p>
-              <p className="text-sm text-muted-foreground">{sprint.status} · {sprint.workItems.length} items</p>
-            </div>
-            <Button variant="outline" onClick={async () => { await api.request(`/sprints/${sprint.id}`, { method: "PATCH", body: JSON.stringify({ status: "ACTIVE" }) }); await reload(); }}>Start sprint</Button>
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {items.filter((item) => !item.sprintId).slice(0, 6).map((item) => (
-              <Button key={item.id} variant="subtle" onClick={async () => { await api.request(`/sprints/${sprint.id}/work-items`, { method: "POST", body: JSON.stringify({ workItemId: item.id }) }); await reload(); }}>
-                {item.title}
-              </Button>
-            ))}
-          </div>
-        </Card>
-      ))}
-    </div>
-  );
-}
+
 
 function Boards({ api, workspaceId, boards, reload }: { api: ApiClient; workspaceId: string; boards: Board[]; reload: () => Promise<void> }) {
   const [draggedItemId, setDraggedItemId] = useState<string>();

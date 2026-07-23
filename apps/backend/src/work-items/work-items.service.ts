@@ -96,9 +96,44 @@ export class WorkItemsService implements OnModuleInit {
         color = EPIC_COLORS[epicCount % EPIC_COLORS.length];
       }
 
+      let columnId = dto.columnId;
+      let status = dto.status;
+
+      if (columnId) {
+        const col = await tx.boardColumn.findUnique({ where: { id: columnId } });
+        if (col) {
+          status = col.name;
+        }
+      } else if (dto.sprintId) {
+        const board = await tx.board.findUnique({
+          where: { sprintId: dto.sprintId },
+          include: { columns: { orderBy: { position: "asc" } } }
+        });
+        if (board && board.columns.length > 0) {
+          if (status) {
+            const matchingCol = board.columns.find((c) => c.name.toLowerCase() === status?.toLowerCase());
+            if (matchingCol) {
+              columnId = matchingCol.id;
+              status = matchingCol.name;
+            } else {
+              columnId = board.columns[0].id;
+            }
+          } else {
+            columnId = board.columns[0].id;
+            status = board.columns[0].name;
+          }
+        }
+      }
+
+      if (!status) {
+        status = dto.sprintId ? "To Do" : "Backlog";
+      }
+
       return tx.workItem.create({
         data: {
           ...dto,
+          status,
+          columnId,
           key,
           color,
           position: (last._max.position ?? -1) + 1
@@ -183,9 +218,31 @@ export class WorkItemsService implements OnModuleInit {
     if (dto.parentEpicId) await this.assertEpic(item.workspaceId, dto.parentEpicId);
     if (dto.assigneeId) await this.assertWorkspaceAssignee(item.workspaceId, dto.assigneeId);
 
+    const updateData: Prisma.WorkItemUncheckedUpdateInput = { ...dto };
+    const effectiveSprintId = dto.sprintId !== undefined ? dto.sprintId : item.sprintId;
+
+    if (dto.columnId !== undefined && dto.columnId !== null) {
+      const col = await this.prisma.boardColumn.findUnique({ where: { id: dto.columnId } });
+      if (col) {
+        updateData.status = col.name;
+      }
+    } else if (dto.status !== undefined && effectiveSprintId) {
+      const board = await this.prisma.board.findUnique({
+        where: { sprintId: effectiveSprintId },
+        include: { columns: { orderBy: { position: "asc" } } }
+      });
+      if (board) {
+        const matchingCol = board.columns.find((c) => c.name.toLowerCase() === dto.status?.toLowerCase());
+        if (matchingCol) {
+          updateData.columnId = matchingCol.id;
+          updateData.status = matchingCol.name;
+        }
+      }
+    }
+
     return this.prisma.workItem.update({
       where: { id },
-      data: dto,
+      data: updateData,
       include: this.include()
     });
   }
@@ -216,9 +273,8 @@ export class WorkItemsService implements OnModuleInit {
     return this.prisma.workItem.update({ where: { id }, data: { estimate }, include: this.include() });
   }
 
-  async updateStatus(userId: string, id: string, status: Prisma.WorkItemUpdateInput["status"]) {
-    await this.getForWrite(userId, id);
-    return this.prisma.workItem.update({ where: { id }, data: { status }, include: this.include() });
+  async updateStatus(userId: string, id: string, status: string) {
+    return this.update(userId, id, { status });
   }
 
   async updateDescription(userId: string, id: string, description: string | null) {
@@ -228,10 +284,39 @@ export class WorkItemsService implements OnModuleInit {
 
   async moveToSprint(userId: string, id: string, sprintId: string | null) {
     const item = await this.getForWrite(userId, id);
-    if (!sprintId) return this.prisma.workItem.update({ where: { id }, data: { sprintId: null, columnId: null, status: "BACKLOG" }, include: this.include() });
-    const sprint = await this.prisma.sprint.findFirst({ where: { id: sprintId, workspaceId: item.workspaceId }, include: { board: { include: { columns: { orderBy: { position: "asc" } } } } } });
+    if (!sprintId) {
+      return this.prisma.workItem.update({
+        where: { id },
+        data: { sprintId: null, columnId: null, status: "Backlog" },
+        include: this.include()
+      });
+    }
+    const sprint = await this.prisma.sprint.findFirst({
+      where: { id: sprintId, workspaceId: item.workspaceId },
+      include: { board: { include: { columns: { orderBy: { position: "asc" } } } } }
+    });
     if (!sprint) throw new BadRequestException("Sprint must belong to this workspace");
-    return this.prisma.workItem.update({ where: { id }, data: { sprintId, columnId: sprint.board?.columns[0]?.id, status: "TODO" }, include: this.include() });
+
+    const columns = sprint.board?.columns ?? [];
+    let targetColumnId: string | null = null;
+    let targetStatus = item.status;
+
+    if (columns.length > 0) {
+      const matchingCol = columns.find((col) => col.name.toLowerCase() === (item.status || "").toLowerCase());
+      if (matchingCol) {
+        targetColumnId = matchingCol.id;
+        targetStatus = matchingCol.name;
+      } else {
+        targetColumnId = columns[0].id;
+        targetStatus = columns[0].name;
+      }
+    }
+
+    return this.prisma.workItem.update({
+      where: { id },
+      data: { sprintId, columnId: targetColumnId, status: targetStatus },
+      include: this.include()
+    });
   }
 
   async movePosition(userId: string, id: string, destination: "TOP" | "BOTTOM") {

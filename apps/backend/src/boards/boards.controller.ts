@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { CurrentUser } from "../auth/current-user.decorator";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard";
-import { BoardWorkItemDto, CreateBoardDto, CreateColumnDto, UpdateBoardDto, UpdateColumnDto } from "./dto";
+import { BoardWorkItemDto, CreateBoardDto, CreateColumnDto, ReorderColumnsDto, UpdateBoardDto, UpdateColumnDto } from "./dto";
 import { BoardsService } from "./boards.service";
 
 @UseGuards(JwtAuthGuard)
@@ -27,6 +27,11 @@ export class BoardsController {
   @Post(":id/columns")
   addColumn(@CurrentUser() user: CurrentUser, @Param("id") id: string, @Body() dto: CreateColumnDto) {
     return this.boards.addColumn(user.id, id, dto);
+  }
+
+  @Patch(":id/reorder-columns")
+  reorderColumns(@CurrentUser() user: CurrentUser, @Param("id") id: string, @Body() dto: ReorderColumnsDto) {
+    return this.boards.reorderColumns(user.id, id, dto.columnIds);
   }
 
   @Patch(":id/columns/:columnId")

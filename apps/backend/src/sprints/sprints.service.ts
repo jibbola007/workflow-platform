@@ -14,7 +14,20 @@ export class SprintsService {
 
   async create(userId: string, dto: CreateSprintDto) {
     await this.workspaces.assertRole(userId, dto.workspaceId, ["ADMIN", "MEMBER"]);
-    return this.prisma.sprint.create({ data: dto, include: this.include() });
+    return this.prisma.$transaction(async (tx) => {
+      const sprint = await tx.sprint.create({ data: dto });
+      const columns = await this.getInitialColumns(tx, dto.workspaceId);
+      await tx.board.create({
+        data: {
+          name: `${sprint.name} Board`,
+          type: "SPRINT",
+          workspaceId: sprint.workspaceId,
+          sprintId: sprint.id,
+          columns: { create: columns }
+        }
+      });
+      return tx.sprint.findUnique({ where: { id: sprint.id }, include: this.include() });
+    });
   }
 
   async list(userId: string, workspaceId?: string) {
@@ -29,20 +42,42 @@ export class SprintsService {
 
   async update(userId: string, id: string, dto: UpdateSprintDto) {
     const sprint = await this.getForWrite(userId, id);
-    if (dto.status === "ACTIVE" && sprint.status !== "ACTIVE") {
-      return this.startSprint(id, dto);
+    const { workspaceId, ...cleanData } = dto as any;
+    const data: Record<string, any> = { ...cleanData };
+
+    if (dto.status === "COMPLETED" && sprint.status !== "COMPLETED") {
+      data.completedAt = new Date();
     }
-    return this.prisma.sprint.update({ where: { id }, data: dto, include: this.include() });
+
+    if (dto.status === "ACTIVE" && sprint.status !== "ACTIVE") {
+      return this.startSprint(id, cleanData);
+    }
+    return this.prisma.sprint.update({ where: { id }, data, include: this.include() });
   }
 
   async addWorkItem(userId: string, id: string, dto: SprintWorkItemDto) {
     const sprint = await this.getForWrite(userId, id);
-    const firstColumn = sprint.board?.columns[0];
     const item = await this.prisma.workItem.findFirst({ where: { id: dto.workItemId, workspaceId: sprint.workspaceId } });
     if (!item) throw new NotFoundException("Work item not found");
+
+    const columns = sprint.board?.columns ?? [];
+    let targetColumnId: string | null = null;
+    let targetStatus = item.status;
+
+    if (columns.length > 0) {
+      const matchingCol = columns.find((col) => col.name.toLowerCase() === (item.status || "").toLowerCase());
+      if (matchingCol) {
+        targetColumnId = matchingCol.id;
+        targetStatus = matchingCol.name;
+      } else {
+        targetColumnId = columns[0].id;
+        targetStatus = columns[0].name;
+      }
+    }
+
     return this.prisma.workItem.update({
       where: { id: dto.workItemId },
-      data: { sprintId: id, columnId: firstColumn?.id, status: "TODO" }
+      data: { sprintId: id, columnId: targetColumnId, status: targetStatus }
     });
   }
 
@@ -52,7 +87,7 @@ export class SprintsService {
     if (!item) throw new NotFoundException("Work item not found");
     return this.prisma.workItem.update({
       where: { id: dto.workItemId },
-      data: { sprintId: null, columnId: null, status: "BACKLOG" }
+      data: { sprintId: null, columnId: null, status: "Backlog" }
     });
   }
 
@@ -64,21 +99,23 @@ export class SprintsService {
   }
 
   private async startSprint(id: string, dto: UpdateSprintDto) {
+    const { workspaceId, ...cleanData } = dto as any;
     return this.prisma.$transaction(async (tx) => {
       const sprint = await tx.sprint.update({
         where: { id },
-        data: { ...dto, status: "ACTIVE" }
+        data: { ...cleanData, status: "ACTIVE" }
       });
 
       const existing = await tx.board.findUnique({ where: { sprintId: id } });
       if (!existing) {
+        const columns = await this.getInitialColumns(tx, sprint.workspaceId);
         await tx.board.create({
           data: {
             name: `${sprint.name} Board`,
             type: "SPRINT",
             workspaceId: sprint.workspaceId,
             sprintId: sprint.id,
-            columns: { create: defaultColumns.map((name, position) => ({ name, position })) }
+            columns: { create: columns }
           }
         });
       }
@@ -87,10 +124,55 @@ export class SprintsService {
     });
   }
 
+  private async getInitialColumns(tx: any, workspaceId: string) {
+    const latestBoard = await tx.board.findFirst({
+      where: { workspaceId, type: "SPRINT" },
+      orderBy: { createdAt: "desc" },
+      include: {
+        columns: {
+          orderBy: { position: "asc" }
+        }
+      }
+    });
+
+    if (latestBoard && latestBoard.columns && latestBoard.columns.length > 0) {
+      return latestBoard.columns.map((col: any, index: number) => ({
+        name: col.name,
+        position: index
+      }));
+    }
+
+    return defaultColumns.map((name, position) => ({ name, position }));
+  }
+
+  private workItemInclude() {
+    return {
+      assignee: { select: { id: true, name: true, email: true } },
+      parentEpic: { select: { id: true, title: true, color: true } },
+      _count: { select: { children: true } },
+      comments: { include: { user: { select: { id: true, name: true } } }, orderBy: { createdAt: "asc" as const } }
+    };
+  }
+
   private include() {
     return {
-      workItems: true,
-      board: { include: { columns: { orderBy: { position: "asc" as const }, include: { workItems: true } } } }
+      workItems: {
+        include: this.workItemInclude(),
+        orderBy: [{ position: "asc" as const }, { updatedAt: "desc" as const }]
+      },
+      board: {
+        include: {
+          columns: {
+            orderBy: { position: "asc" as const },
+            include: {
+              workItems: {
+                include: this.workItemInclude(),
+                orderBy: [{ position: "asc" as const }, { updatedAt: "desc" as const }]
+              }
+            }
+          }
+        }
+      }
     };
   }
 }

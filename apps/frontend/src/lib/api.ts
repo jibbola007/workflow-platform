@@ -10,7 +10,7 @@ export type WorkItem = {
   color?: string;
   type: "TASK" | "FEATURE" | "BUG" | "EPIC" | "STORY";
   priority: "LOW" | "MEDIUM" | "HIGH" | "URGENT";
-  status: "BACKLOG" | "TODO" | "IN_PROGRESS" | "DONE";
+  status: string;
   estimate?: number;
   position: number;
   workspaceId: string;
@@ -23,8 +23,9 @@ export type WorkItem = {
   _count?: { children: number };
   comments?: Array<{ id: string; message: string; createdAt: string; user: Pick<User, "id" | "name"> }>;
 };
-export type Sprint = { id: string; name: string; goal?: string; status: string; startDate: string; endDate: string; workItems: WorkItem[]; board?: Board };
-export type Board = { id: string; name: string; type: "SPRINT" | "KANBAN"; columns: Array<{ id: string; name: string; workItems: WorkItem[] }> };
+export type BoardColumn = { id: string; name: string; position: number; boardId: string; workItems: WorkItem[] };
+export type Board = { id: string; name: string; type: "SPRINT" | "KANBAN"; workspaceId: string; sprintId?: string; columns: BoardColumn[] };
+export type Sprint = { id: string; name: string; goal?: string; status: "PLANNED" | "ACTIVE" | "COMPLETED"; startDate: string; endDate: string; completedAt?: string; workspaceId: string; createdAt?: string; updatedAt?: string; workItems: WorkItem[]; board?: Board };
 
 export class ApiClient {
   constructor(private token?: string) {}
